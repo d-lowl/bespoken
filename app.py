@@ -1,12 +1,13 @@
-import srsly
 from pathlib import Path
 import json
 
 from bespoken import chat
-from bespoken.tools import FileTool, TodoTools
+from bespoken.tools.filesystem import FileTool, list_files, read_file, write_file, replace_in_file
+from bespoken.tools.todo import TodoTools
 from bespoken.prompts import marimo_prompt
 from bespoken import ui
 from bespoken import config
+from langchain_ollama import ChatOllama
 
 def set_role():
     """Set a role for the assistant"""
@@ -26,15 +27,30 @@ def debug_reason():
     return out
 
 
+# Initialize the Ollama chat model with the specified Qwen3-Coder model
+model = ChatOllama(
+    model="hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:UD-Q4_K_XL",
+    temperature=0.7,
+)
+
+# Create tools list
+tools = []
+# Add file-specific tools
+tools.extend(FileTool("edit.py"))
+# Add general file system tools
+tools.extend([list_files, read_file, write_file, replace_in_file])
+# Add todo tools
+tools.extend(TodoTools())
+
 chat(
-    model_name="anthropic/claude-3-5-sonnet-20240620",
-    tools=[FileTool("edit.py"), TodoTools()],
+    model_name=model,  # Pass the model instance instead of a string
+    tools=tools,
     system_prompt=marimo_prompt,
     debug=True,
+    stream=False,
     slash_commands={
         "/thinking": "Let me think through this step by step:",
         "/role": set_role,
         "/debug_prompt": debug_reason,
     },
-    history_callback=lambda x: srsly.write_jsonl(Path("logs.json"), x, append=True, append_new_line=False)
 )

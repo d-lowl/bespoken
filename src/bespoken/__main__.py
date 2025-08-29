@@ -3,7 +3,6 @@ from typing import Optional, Callable
 import json
 import uuid
 
-import llm
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
@@ -12,13 +11,16 @@ from rich.live import Live
 from rich.prompt import Prompt
 from rich.columns import Columns
 from rich.text import Text
+from langchain_core.messages.human import HumanMessage
+from langchain_core.messages.ai import AIMessage
+from langchain_core.messages.system import SystemMessage
+from langchain_core.language_models.chat_models import BaseChatModel
 
 from . import config
 from . import ui
 
 
 load_dotenv(".env")
-
 
 # Command result constants
 COMMAND_QUIT = "QUIT"
@@ -51,8 +53,6 @@ def handle_help(user_commands):
     
     ui.print("")
     return COMMAND_HANDLED
-
-
 
 
 def handle_tools(tools):
@@ -107,23 +107,23 @@ def handle_user_command(command, handler):
         return COMMAND_HANDLED
 
 
-def dispatch_slash_command(command, user_commands, model, tools, conversation):
+def dispatch_slash_command(command, user_commands, model, tools, conversation_history):
     """Dispatch slash command to appropriate handler"""
     if command == "/quit":
-        return handle_quit(), conversation
+        return handle_quit(), conversation_history
     elif command == "/help":
-        return handle_help(user_commands), conversation
+        return handle_help(user_commands), conversation_history
     elif command == "/tools":
-        return handle_tools(tools), conversation
+        return handle_tools(tools), conversation_history
     elif command == "/debug":
-        return toggle_debug(), conversation
+        return toggle_debug(), conversation_history
     elif command in user_commands:
-        return handle_user_command(command, user_commands[command]), conversation
+        return handle_user_command(command, user_commands[command]), conversation_history
     else:
         ui.print(f"[red]Unknown command: {command}[/red]")
         ui.print("[dim]Type /help for available commands[/dim]")
         ui.print("")
-        return COMMAND_HANDLED, conversation
+        return COMMAND_HANDLED, conversation_history
 
 
 def chat(
@@ -151,15 +151,21 @@ def chat(
         ui.print("[magenta]Debug mode enabled[/magenta]")
         ui.print("")
     
-    
-    try:
-        model = llm.get_model(model_name)
-    except Exception as e:
-        ui.print(f"[red]Error loading model '{model_name}': {e}[/red]")
+    # Initialize the model - this should be passed in from the caller
+    # For now, we'll expect it to be a BaseChatModel instance
+    if not isinstance(model_name, BaseChatModel):
+        ui.print(f"[red]Error: model_name should be a BaseChatModel instance, got {type(model_name)}[/red]")
         raise typer.Exit(1)
     
-    conversation = model.conversation(tools=tools)
-    history = []
+    model = model_name
+    
+    # Bind tools to the model if provided
+    if tools:
+        model = model.bind_tools(tools)
+    
+    print(model)
+    conversation_history = []
+    
     try:
         while True:
             # Define available commands for completion (builtin + user commands)
@@ -179,7 +185,7 @@ def chat(
                 # Check if it's a known command
                 builtin_commands = ["/quit", "/help", "/tools", "/debug"]
                 if out in builtin_commands or out in user_commands:
-                    result, conversation = dispatch_slash_command(out, user_commands, model, tools, conversation)
+                    result, conversation_history = dispatch_slash_command(out, user_commands, model, tools, conversation_history)
                     
                     if result == COMMAND_QUIT:
                         break
@@ -202,28 +208,56 @@ def chat(
             response_started = False
 
             with Live(padded_spinner, console=console, refresh_per_second=10) as live:
-                if history_callback:
-                    new_id = str(uuid.uuid4()).replace("-", "")[:24]
-                    history_callback([{"id": f"msg_{new_id}", "role": "user", "content": [{"text": out, "type": "text"}]}])
-                for chunk in conversation.chain(out, system=system_prompt, stream=stream):
-                    if not response_started:
-                        # First chunk received, stop the spinner
-                        live.stop()
-                        response_started = True
-                        ui.print("")  # Add whitespace after spinner
-                        # Initialize streaming state
-                        ui.start_streaming(ui.LEFT_PADDING)
-                    
-                    # Stream each chunk as it arrives
-                    ui.stream_chunk(chunk, ui.LEFT_PADDING)
+                # Prepare messages for the model
+                messages = conversation_history.copy()
                 
-                # Finish streaming and print any remaining text
-                if response_started:
-                    ui.end_streaming(ui.LEFT_PADDING)
-                ids = set([e["id"] for e in history])
-                new_responses = [e for e in conversation.responses if e.response_json["id"] not in ids]
+                # Add system message if provided
+                if system_prompt:
+                    messages.insert(0, SystemMessage(content=system_prompt))
+                
+                # Add user message
+                messages.append(HumanMessage(content=out))
+                
+                # Stream the response
+                if stream:
+                    raise NotImplementedError("Streaming is not supported yet")
+                else:
+                    # Non-streaming response
+                    response = model.invoke(messages)
+                    print(response)
+                    live.stop()
+                    ui.print("")  # Add whitespace after spinner
+                    ui.print(response.content)
+                
+                # Update conversation history
+                conversation_history.append(HumanMessage(content=out))
+                if stream:
+                    # For streaming, we need to collect the full response
+                    full_response = ""
+                    for chunk in model.stream(messages):
+                        if hasattr(chunk, 'content') and chunk.content:
+                            full_response += chunk.content
+                    conversation_history.append(AIMessage(content=full_response))
+                else:
+                    conversation_history.append(response)
+                
+                # Call history callback with new messages
                 if history_callback:
-                    history_callback([e.response_json for e in new_responses])
+                    new_responses = []
+                    for msg in conversation_history[-2:]:  # Last user and AI messages
+                        if isinstance(msg, HumanMessage):
+                            new_responses.append({
+                                "id": str(uuid.uuid4()).replace("-", "")[:24],
+                                "role": "user", 
+                                "content": [{"text": msg.content, "type": "text"}]
+                            })
+                        elif isinstance(msg, AIMessage):
+                            new_responses.append({
+                                "id": str(uuid.uuid4()).replace("-", "")[:24],
+                                "role": "assistant",
+                                "content": [{"text": msg.content, "type": "text"}]
+                            })
+                    history_callback(new_responses)
 
             ui.print("")  # Add extra newline after bot response
     except KeyboardInterrupt:
