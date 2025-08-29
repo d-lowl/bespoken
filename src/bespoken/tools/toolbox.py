@@ -45,10 +45,10 @@ class Toolbox:
                         if params and params[0].name == "self":
                             bound_func = functools.partial(tool_obj.func, self)
                             # Recreate the tool with the same metadata but a bound function
-                            rebound_tool = StructuredTool(
+                            rebound_tool = StructuredTool.from_function(
+                                func=bound_func,
                                 name=tool_obj.name,
                                 description=tool_obj.description,
-                                func=bound_func,
                             )
                             collected.append(rebound_tool)
                             continue
