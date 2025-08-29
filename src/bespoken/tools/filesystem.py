@@ -150,7 +150,7 @@ def FileTool(file_path: Optional[str] = None):
     if not file_path_obj.exists():
         raise FileNotFoundError(f"File does not exist: {file_path}")
     
-    class _FileTool(llm.Toolbox):
+    class _FileTool(Toolbox):
         f"""Single file editing toolbox - focused on editing {file_path_obj.name}. This tool cannot be used to open or edit other files."""
         
         def __init__(self):
@@ -161,12 +161,14 @@ def FileTool(file_path: Optional[str] = None):
             ui.tool_debug(f"\n>>> Tool returning to LLM: {value}\n")
             return value
         
+        @tool
         def get_file_path(self) -> str:
             """Return the path to the file that this tool is allowed to edit."""
             ui.tool_debug(">>> LLM calling tool: get_file_path()")
             ui.tool_status(f"Getting file path for: {self.file_path.name}")
             return self._debug_return(f"This tool can only access one file: {self.file_path}. Other files exist but are not accessible through this tool.")
         
+        @tool(description=f"Read the content of {file_path_obj.name}. This tool cannot be used to open or edit other files.")
         def read_file(self) -> str:
             f"""Read the content of {self.file_path.name}. This tool cannot be used to open or edit other files."""
             ui.tool_debug(">>> LLM calling tool: read_file()")
@@ -179,6 +181,7 @@ def FileTool(file_path: Optional[str] = None):
                 
             return self._debug_return(content)
         
+        @tool(description=f"Replace string in {file_path_obj.name} and show diff. The user may deny the change, in which case you should wait for new instructions. This tool cannot be used to open or edit other files.")
         def replace_in_file(self, old_string: str, new_string: str) -> str:
             f"""Replace string in {self.file_path.name} and show diff. The user may deny the change, in which case you should wait for new instructions. This tool cannot be used to open or edit other files."""
             ui.tool_debug(f">>> LLM calling tool: replace_in_file(old_string=<{len(old_string)} chars>, new_string=<{len(new_string)} chars>)")

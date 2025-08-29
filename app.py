@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 
 from bespoken import chat
+from bespoken.tools.filesystem import FileTool
 from bespoken.tools.todo import TodoTools
 from bespoken.prompts import marimo_prompt
 from bespoken import ui
@@ -35,7 +36,7 @@ model = ChatOllama(
 # Create tools list
 tools = []
 # Add file-specific tools
-# tools.extend(FileTool("edit.py"))
+tools.append(FileTool("edit.py"))
 # Add general file system tools
 # tools.extend([list_files, read_file, write_file, replace_in_file])
 # Add todo tools
