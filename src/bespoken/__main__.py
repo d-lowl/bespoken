@@ -156,7 +156,7 @@ def chat(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode to see LLM interactions"),
     model_name: str = typer.Option("anthropic/claude-3-5-sonnet-20240620", "--model", "-m", help="LLM model to use"),
     system_prompt: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt for the assistant"),
-    tools: list[Toolbox | Callable] = None,
+    tools: list = None,
     slash_commands: dict = None,
     history_callback: Optional[Callable] = None,
     stream: bool = typer.Option(True, "--stream", "-s", help="Stream the response from the LLM"),

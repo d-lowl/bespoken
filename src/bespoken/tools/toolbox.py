@@ -49,9 +49,6 @@ class Toolbox:
                                 name=tool_obj.name,
                                 description=tool_obj.description,
                                 func=bound_func,
-                                args_schema=getattr(tool_obj, "args_schema", None),
-                                return_direct=getattr(tool_obj, "return_direct", False),
-                                infer_schema=False,
                             )
                             collected.append(rebound_tool)
                             continue
