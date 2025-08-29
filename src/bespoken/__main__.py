@@ -17,6 +17,7 @@ from langchain_core.messages.system import SystemMessage
 from langchain_core.messages import ToolMessage
 from typing import Any, Dict, List, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import BaseTool
 
 from bespoken.tools.toolbox import Toolbox
 
@@ -152,11 +153,22 @@ def dispatch_slash_command(command, user_commands, model, tools, conversation_hi
         return COMMAND_HANDLED, conversation_history
 
 
+def collect_tools(tools: list[Toolbox | BaseTool]) -> list[BaseTool]:
+    """Collect all tools from toolboxes and plain tools into one list"""
+    bound_tools: List[Any] = []
+    for item in tools:
+        if isinstance(item, Toolbox):
+            bound_tools.extend(item.collect_tools())
+        else:
+            bound_tools.append(item)
+    return bound_tools
+
+
 def chat(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode to see LLM interactions"),
-    model_name: str = typer.Option("anthropic/claude-3-5-sonnet-20240620", "--model", "-m", help="LLM model to use"),
+    model: BaseChatModel = typer.Option(None, "--model", "-m", help="LLM model to use"),
     system_prompt: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt for the assistant"),
-    tools: list = None,
+    tools: list[Toolbox | BaseTool] = None,
     slash_commands: dict = None,
     history_callback: Optional[Callable] = None,
     stream: bool = typer.Option(True, "--stream", "-s", help="Stream the response from the LLM"),
@@ -177,25 +189,10 @@ def chat(
         ui.print("[magenta]Debug mode enabled[/magenta]")
         ui.print("")
     
-    # Initialize the model - this should be passed in from the caller
-    # For now, we'll expect it to be a BaseChatModel instance
-    if not isinstance(model_name, BaseChatModel):
-        ui.print(f"[red]Error: model_name should be a BaseChatModel instance, got {type(model_name)}[/red]")
-        raise typer.Exit(1)
-    
-    model = model_name
-    
     # Bind tools to the model if provided
     if tools:
-        # Collect all tools from toolboxes and plain tools into one list
-        bound_tools: List[Any] = []
-        for item in tools:
-            if isinstance(item, Toolbox):
-                bound_tools.extend(item.collect_tools())
-            else:
-                bound_tools.append(item)
-        model = model.bind_tools(bound_tools)
-    
+        model = model.bind_tools(collect_tools(tools))
+
     conversation_history = []
     
     try:
@@ -258,7 +255,7 @@ def chat(
                     def _run_tools_until_done(
                         bound_model: BaseChatModel,
                         start_messages: List[Any],
-                        available_tools: Optional[List[Any]] = None,
+                        available_tools: Optional[List[BaseTool]] = None,
                     ) -> Tuple[AIMessage, List[Any]]:
                         """Invoke the model and execute any returned tool calls until completion.
                         Returns the final AIMessage and the list of new messages (AI/tool) produced in this turn.
@@ -307,8 +304,7 @@ def chat(
                                 produced_messages.append(tool_message)
                                 working_messages.append(tool_message)
 
-                    final_response, produced_messages = _run_tools_until_done(model, messages, tools)
-                    print(final_response)
+                    final_response, produced_messages = _run_tools_until_done(model, messages, collect_tools(tools))
                     live.stop()
                     ui.print("")  # Add whitespace after spinner
                     ui.print(final_response.content)

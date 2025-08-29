@@ -6,7 +6,6 @@ import difflib
 import re
 from bespoken.tools.toolbox import Toolbox
 from langchain_core.tools import tool
-import llm
 from rich import get_console
 from rich.prompt import Confirm, Prompt
 
@@ -69,6 +68,7 @@ class FileSystem(Toolbox):
         
         return self._debug_return(f"Wrote {len(content):,} characters to '{file_path}'")
     
+    @tool
     def replace_in_file(self, file_path: str, old_string: str, new_string: str) -> str:
         """Replace string in file and show diff. The user may deny the change, in which case you should wait for new instructions."""
         ui.tool_debug(f">>> LLM calling tool: replace_in_file(file_path={repr(file_path)}, old_string=<{len(old_string)} chars>, new_string=<{len(new_string)} chars>)")

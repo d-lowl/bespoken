@@ -2,8 +2,7 @@
 
 from typing import List
 import inspect
-import functools
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool, tool
 
 
 class Toolbox:
@@ -16,6 +15,29 @@ class Toolbox:
 
     def __init__(self):
         pass
+
+    @staticmethod
+    def _bind_tool(tool_obj: BaseTool, self: any) -> BaseTool:
+        """Bind the instance (self) to the underlying function so LangChain can invoke them."""
+        func = tool_obj.func
+        def inner(*args, **kwargs):
+            return func(self, *args, **kwargs)
+        inner.__name__ = f"{self.__class__.__name__}__{tool_obj.name}"
+        sig = inspect.signature(func)
+        params = list(sig.parameters.values())[1:]  # Skip 'self'
+        new_sig = sig.replace(parameters=params)
+        inner.__signature__ = new_sig
+        if hasattr(func, '__annotations__'):
+            inner.__annotations__ = {
+                k: v for k, v in func.__annotations__.items() 
+                if k != 'self'
+            }
+
+        return tool(
+            inner,
+            description=tool_obj.description,
+        )
+
 
     def collect_tools(self) -> List[BaseTool]:
         """Collect all tools from the toolbox instance.
@@ -43,13 +65,7 @@ class Toolbox:
                         # If the underlying function expects 'self' as the first parameter,
                         # bind this instance so the tool can be called without it.
                         if params and params[0].name == "self":
-                            bound_func = functools.partial(tool_obj.func, self)
-                            # Recreate the tool with the same metadata but a bound function
-                            rebound_tool = StructuredTool.from_function(
-                                func=bound_func,
-                                name=tool_obj.name,
-                                description=tool_obj.description,
-                            )
+                            rebound_tool = self._bind_tool(tool_obj, self)
                             collected.append(rebound_tool)
                             continue
 
