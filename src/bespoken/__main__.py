@@ -14,6 +14,8 @@ from rich.text import Text
 from langchain_core.messages.human import HumanMessage
 from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.system import SystemMessage
+from langchain_core.messages import ToolMessage
+from typing import Any, Dict, List, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from . import config
@@ -222,12 +224,64 @@ def chat(
                 if stream:
                     raise NotImplementedError("Streaming is not supported yet")
                 else:
-                    # Non-streaming response
-                    response = model.invoke(messages)
-                    print(response)
+                    # Non-streaming response with tool loop
+                    def _run_tools_until_done(
+                        bound_model: BaseChatModel,
+                        start_messages: List[Any],
+                        available_tools: Optional[List[Any]] = None,
+                    ) -> Tuple[AIMessage, List[Any]]:
+                        """Invoke the model and execute any returned tool calls until completion.
+                        Returns the final AIMessage and the list of new messages (AI/tool) produced in this turn.
+                        """
+                        tool_by_name: Dict[str, Any] = {}
+                        if available_tools:
+                            for t in available_tools:
+                                name = getattr(t, "name", getattr(t, "tool_name", None))
+                                if name:
+                                    tool_by_name[name] = t
+
+                        working_messages: List[Any] = list(start_messages)
+                        produced_messages: List[Any] = []
+
+                        while True:
+                            result = bound_model.invoke(working_messages)
+                            # Append the AI message to both trackers
+                            produced_messages.append(result)
+                            working_messages.append(result)
+
+                            tool_calls = getattr(result, "tool_calls", None)
+                            if not tool_calls:
+                                # No tool calls -> final response
+                                return result, produced_messages
+
+                            # Execute each tool call and append ToolMessage
+                            for call in tool_calls:
+                                call_name = getattr(call, "name", None) or (call.get("name") if isinstance(call, dict) else None)
+                                call_args = getattr(call, "args", None) or (call.get("args") if isinstance(call, dict) else None) or {}
+                                call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+
+                                tool = tool_by_name.get(call_name)
+                                if tool is None:
+                                    tool_output = f"Error: Tool '{call_name}' is not available."
+                                else:
+                                    try:
+                                        # LangChain tools created via @tool support .invoke with dict args
+                                        tool_output = tool.invoke(call_args)
+                                    except Exception as e:
+                                        tool_output = f"Error calling tool '{call_name}': {e}"
+
+                                tool_message = ToolMessage(
+                                    content=str(tool_output),
+                                    tool_call_id=call_id or "",
+                                )
+                                produced_messages.append(tool_message)
+                                working_messages.append(tool_message)
+
+                    final_response, produced_messages = _run_tools_until_done(model, messages, tools)
+                    print(final_response)
                     live.stop()
                     ui.print("")  # Add whitespace after spinner
-                    ui.print(response.content)
+                    ui.print(final_response.content)
                 
                 # Update conversation history
                 conversation_history.append(HumanMessage(content=out))
@@ -239,25 +293,36 @@ def chat(
                             full_response += chunk.content
                     conversation_history.append(AIMessage(content=full_response))
                 else:
-                    conversation_history.append(response)
+                    # Include AI/tool messages produced during this turn
+                    conversation_history.extend(produced_messages)
                 
                 # Call history callback with new messages
                 if history_callback:
+                    # Find the last HumanMessage and the last AIMessage, ignoring tool messages
+                    last_user = None
+                    last_ai = None
+                    for msg in reversed(conversation_history):
+                        if last_ai is None and isinstance(msg, AIMessage):
+                            last_ai = msg
+                        elif last_user is None and isinstance(msg, HumanMessage):
+                            last_user = msg
+                        if last_user and last_ai:
+                            break
                     new_responses = []
-                    for msg in conversation_history[-2:]:  # Last user and AI messages
-                        if isinstance(msg, HumanMessage):
-                            new_responses.append({
-                                "id": str(uuid.uuid4()).replace("-", "")[:24],
-                                "role": "user", 
-                                "content": [{"text": msg.content, "type": "text"}]
-                            })
-                        elif isinstance(msg, AIMessage):
-                            new_responses.append({
-                                "id": str(uuid.uuid4()).replace("-", "")[:24],
-                                "role": "assistant",
-                                "content": [{"text": msg.content, "type": "text"}]
-                            })
-                    history_callback(new_responses)
+                    if last_user is not None:
+                        new_responses.append({
+                            "id": str(uuid.uuid4()).replace("-", "")[:24],
+                            "role": "user",
+                            "content": [{"text": last_user.content, "type": "text"}],
+                        })
+                    if last_ai is not None:
+                        new_responses.append({
+                            "id": str(uuid.uuid4()).replace("-", "")[:24],
+                            "role": "assistant",
+                            "content": [{"text": last_ai.content, "type": "text"}],
+                        })
+                    if new_responses:
+                        history_callback(new_responses)
 
             ui.print("")  # Add extra newline after bot response
     except KeyboardInterrupt:
