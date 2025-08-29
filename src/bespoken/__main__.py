@@ -65,8 +65,20 @@ def handle_tools(tools):
         ui.print("[cyan]Available tools:[/cyan]")
         for tool in tools:
             if isinstance(tool, Toolbox):
-                # TODO: show all tools in the toolbox
-                pass
+                # Show all tools inside the toolbox with names and descriptions
+                collected = tool.collect_tools()
+                toolbox_name = type(tool).__name__
+                if not collected:
+                    ui.print(f"  {toolbox_name} (no tools)")
+                else:
+                    ui.print(f"  {toolbox_name}:")
+                    for t in collected:
+                        name = getattr(t, 'name', None) or getattr(t, 'tool_name', None) or type(t).__name__
+                        desc = getattr(t, 'description', None)
+                        if desc:
+                            ui.print(f"    - {name} - {desc}")
+                        else:
+                            ui.print(f"    - {name}")
             else:
                 # TODO: show a single tool
                 name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or type(tool).__name__
@@ -175,8 +187,14 @@ def chat(
     
     # Bind tools to the model if provided
     if tools:
-        # TODO: collect all tools from the toolboxe together with individual tools, and then bind them to the model
-        model = model.bind_tools(tools)
+        # Collect all tools from toolboxes and plain tools into one list
+        bound_tools: List[Any] = []
+        for item in tools:
+            if isinstance(item, Toolbox):
+                bound_tools.extend(item.collect_tools())
+            else:
+                bound_tools.append(item)
+        model = model.bind_tools(bound_tools)
     
     conversation_history = []
     
