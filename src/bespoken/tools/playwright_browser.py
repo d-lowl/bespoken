@@ -1,13 +1,14 @@
 """Playwright browser tool for dynamic web interaction."""
 
 from typing import Optional
-import llm
 
 from .. import config
 from playwright.sync_api import sync_playwright, Browser, Page
+from langchain_core.tools import tool
+from .toolbox import Toolbox
 
 
-class PlaywrightTool(llm.Toolbox):
+class PlaywrightTool(Toolbox):
     """Tool for browser automation using Playwright.
     
     This tool requires the 'browser' extra to be installed:
@@ -38,6 +39,7 @@ class PlaywrightTool(llm.Toolbox):
         config.tool_debug(f"\n>>> Tool returning to LLM: {repr(value[:200])}...\n")
         return value
     
+    @tool
     def navigate(self, url: str) -> str:
         """Navigate to a URL and wait for page to load.
         
@@ -57,6 +59,7 @@ class PlaywrightTool(llm.Toolbox):
         config.tool_success(f"Navigated to page: {title}")
         return self._debug_return(f"Successfully navigated to {url}. Page title: {title}")
     
+    @tool
     def click_text(self, text: str) -> str:
         """Click an element containing specific text.
         
@@ -82,6 +85,7 @@ class PlaywrightTool(llm.Toolbox):
             config.tool_error(error_msg)
             return self._debug_return(f"Error: {error_msg}")
     
+    @tool
     def fill_field(self, label_or_placeholder: str, text: str) -> str:
         """Fill a text input field by its label or placeholder text.
         
@@ -111,6 +115,7 @@ class PlaywrightTool(llm.Toolbox):
             config.tool_error(error_msg)
             return self._debug_return(f"Error: {error_msg}")
     
+    @tool
     def get_content(self) -> str:
         """Get the current page content as text.
         
@@ -136,6 +141,7 @@ class PlaywrightTool(llm.Toolbox):
             config.tool_error(error_msg)
             return self._debug_return(f"Error: {error_msg}")
     
+    @tool
     def screenshot(self, path: str = "screenshot.png") -> str:
         """Take a screenshot of the current page.
         
@@ -158,6 +164,7 @@ class PlaywrightTool(llm.Toolbox):
             config.tool_error(error_msg)
             return self._debug_return(f"Error: {error_msg}")
     
+    @tool
     def wait_for_text(self, text: str, timeout: int = 30000) -> str:
         """Wait for specific text to appear on the page.
         
@@ -181,6 +188,7 @@ class PlaywrightTool(llm.Toolbox):
             config.tool_error(error_msg)
             return self._debug_return(f"Error: {error_msg}")
     
+    @tool
     def close(self) -> str:
         """Close the browser and clean up resources."""
         config.tool_debug(">>> LLM calling tool: close()")

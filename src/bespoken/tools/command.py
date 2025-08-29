@@ -4,10 +4,11 @@ from typing import Optional
 from pathlib import Path
 import subprocess
 import shutil
-import llm
 
 from .. import config
 from .. import ui
+from .toolbox import Toolbox
+from langchain_core.tools import tool
 
 
 def run_command(command: str, working_directory: Optional[str] = ".", timeout: int = 30) -> str:
@@ -74,7 +75,7 @@ def run_command(command: str, working_directory: Optional[str] = ".", timeout: i
         return f"Error executing command: {e}"
 
 
-class GitTool(llm.Toolbox):
+class GitTool(Toolbox):
     """Git command execution tool - safe git operations only."""
     
     def __init__(self, auto_trust: bool = False):
@@ -119,28 +120,32 @@ class GitTool(llm.Toolbox):
         except Exception as e:
             return f"Error executing git command: {e}"
     
+    @tool
     def status(self, working_directory: Optional[str] = None) -> str:
         """Get git status."""
         config.tool_debug(f">>> LLM calling tool: GitTool.status(working_directory={repr(working_directory)})")
         return self._run_git("status", working_directory)
     
+    @tool
     def log(self, args: str = "--oneline -10", working_directory: Optional[str] = None) -> str:
         """Get git log. Default: last 10 commits in oneline format."""
         config.tool_debug(f">>> LLM calling tool: GitTool.log(args={repr(args)}, working_directory={repr(working_directory)})")
         return self._run_git(f"log {args}", working_directory)
     
+    @tool
     def diff(self, args: str = "", working_directory: Optional[str] = None) -> str:
         """Get git diff."""
         config.tool_debug(f">>> LLM calling tool: GitTool.diff(args={repr(args)}, working_directory={repr(working_directory)})")
         return self._run_git(f"diff {args}", working_directory)
     
+    @tool
     def branch(self, args: str = "-a", working_directory: Optional[str] = None) -> str:
         """List git branches. Default: all branches."""
         config.tool_debug(f">>> LLM calling tool: GitTool.branch(args={repr(args)}, working_directory={repr(working_directory)})")
         return self._run_git(f"branch {args}", working_directory)
 
 
-class NpmTool(llm.Toolbox):
+class NpmTool(Toolbox):
     """NPM command execution tool - safe npm operations only."""
     
     def __init__(self, auto_trust: bool = False):
@@ -184,30 +189,34 @@ class NpmTool(llm.Toolbox):
         except Exception as e:
             return f"Error executing npm command: {e}"
     
+    @tool
     def list(self, depth: int = 0, working_directory: Optional[str] = None) -> str:
         """List installed packages."""
         config.tool_debug(f">>> LLM calling tool: NpmTool.list(depth={depth}, working_directory={repr(working_directory)})")
         args = f"list --depth={depth}"
         return self._run_npm(args, working_directory)
     
+    @tool
     def outdated(self, working_directory: Optional[str] = None) -> str:
         """Check for outdated packages."""
         config.tool_debug(f">>> LLM calling tool: NpmTool.outdated(working_directory={repr(working_directory)})")
         return self._run_npm("outdated", working_directory)
     
+    @tool
     def audit(self, fix: bool = False, working_directory: Optional[str] = None) -> str:
         """Run security audit. Set fix=True to auto-fix issues."""
         config.tool_debug(f">>> LLM calling tool: NpmTool.audit(fix={fix}, working_directory={repr(working_directory)})")
         args = "audit fix" if fix else "audit"
         return self._run_npm(args, working_directory)
     
+    @tool
     def scripts(self, working_directory: Optional[str] = None) -> str:
         """List available npm scripts from package.json."""
         config.tool_debug(f">>> LLM calling tool: NpmTool.scripts(working_directory={repr(working_directory)})")
         return self._run_npm("run", working_directory)
 
 
-class PythonTool(llm.Toolbox):
+class PythonTool(Toolbox):
     """Python command execution tool - safe python operations only."""
     
     def __init__(self, auto_trust: bool = False, uv: bool = True):
@@ -286,11 +295,13 @@ class PythonTool(llm.Toolbox):
         except Exception as e:
             return f"Error executing uv command: {e}"
     
+    @tool
     def version(self) -> str:
         """Get Python version."""
         config.tool_debug(">>> LLM calling tool: PythonTool.version()")
         return self._run_python("--version")
     
+    @tool
     def pip_list(self, format: str = "columns", working_directory: Optional[str] = None) -> str:
         """List installed packages. Format can be: columns, freeze, json."""
         config.tool_debug(f">>> LLM calling tool: PythonTool.pip_list(format={repr(format)}, working_directory={repr(working_directory)})")
@@ -302,6 +313,7 @@ class PythonTool(llm.Toolbox):
             args = f"-m pip list --format={format}"
             return self._run_python(args, working_directory)
     
+    @tool
     def pip_show(self, package: str, working_directory: Optional[str] = None) -> str:
         """Show details about a specific package."""
         config.tool_debug(f">>> LLM calling tool: PythonTool.pip_show(package={repr(package)}, working_directory={repr(working_directory)})")
@@ -311,6 +323,7 @@ class PythonTool(llm.Toolbox):
         else:
             return self._run_python(f"-m pip show {package}", working_directory)
     
+    @tool
     def check_import(self, module: str, working_directory: Optional[str] = None) -> str:
         """Check if a module can be imported."""
         config.tool_debug(f">>> LLM calling tool: PythonTool.check_import(module={repr(module)}, working_directory={repr(working_directory)})")

@@ -14,7 +14,12 @@ from rich.text import Text
 from langchain_core.messages.human import HumanMessage
 from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.system import SystemMessage
+from langchain_core.messages import ToolMessage
+from typing import Any, Dict, List, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.tools import BaseTool
+
+from bespoken.tools.toolbox import Toolbox
 
 from . import config
 from . import ui
@@ -60,8 +65,30 @@ def handle_tools(tools):
     if tools:
         ui.print("[cyan]Available tools:[/cyan]")
         for tool in tools:
-            tool_name = getattr(tool, 'tool_name', type(tool).__name__)
-            ui.print(f"  {tool_name}")
+            if isinstance(tool, Toolbox):
+                # Show all tools inside the toolbox with names and descriptions
+                collected = tool.collect_tools()
+                toolbox_name = type(tool).__name__
+                if not collected:
+                    ui.print(f"  {toolbox_name} (no tools)")
+                else:
+                    ui.print(f"  {toolbox_name}:")
+                    for t in collected:
+                        name = getattr(t, 'name', None) or getattr(t, 'tool_name', None) or type(t).__name__
+                        desc = getattr(t, 'description', None)
+                        if desc:
+                            ui.print(f"    - {name} - {desc}")
+                        else:
+                            ui.print(f"    - {name}")
+            else:
+                # TODO: show a single tool
+                name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or type(tool).__name__
+                desc = getattr(tool, 'description', None)
+                if desc:
+                    ui.print(f"  {name} - {desc}")
+                else:
+                    ui.print(f"  {name}")
+            # NOTE for the agent: this may probably be simplified, but make it nice and readable for the user
     else:
         ui.print("[dim]No tools configured[/dim]")
     ui.print("")
@@ -126,11 +153,22 @@ def dispatch_slash_command(command, user_commands, model, tools, conversation_hi
         return COMMAND_HANDLED, conversation_history
 
 
+def collect_tools(tools: list[Toolbox | BaseTool]) -> list[BaseTool]:
+    """Collect all tools from toolboxes and plain tools into one list"""
+    bound_tools: List[Any] = []
+    for item in tools:
+        if isinstance(item, Toolbox):
+            bound_tools.extend(item.collect_tools())
+        else:
+            bound_tools.append(item)
+    return bound_tools
+
+
 def chat(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode to see LLM interactions"),
-    model_name: str = typer.Option("anthropic/claude-3-5-sonnet-20240620", "--model", "-m", help="LLM model to use"),
+    model: BaseChatModel = typer.Option(None, "--model", "-m", help="LLM model to use"),
     system_prompt: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt for the assistant"),
-    tools: list = None,
+    tools: list[Toolbox | BaseTool] = None,
     slash_commands: dict = None,
     history_callback: Optional[Callable] = None,
     stream: bool = typer.Option(True, "--stream", "-s", help="Stream the response from the LLM"),
@@ -151,19 +189,10 @@ def chat(
         ui.print("[magenta]Debug mode enabled[/magenta]")
         ui.print("")
     
-    # Initialize the model - this should be passed in from the caller
-    # For now, we'll expect it to be a BaseChatModel instance
-    if not isinstance(model_name, BaseChatModel):
-        ui.print(f"[red]Error: model_name should be a BaseChatModel instance, got {type(model_name)}[/red]")
-        raise typer.Exit(1)
-    
-    model = model_name
-    
     # Bind tools to the model if provided
     if tools:
-        model = model.bind_tools(tools)
-    
-    print(model)
+        model = model.bind_tools(collect_tools(tools))
+
     conversation_history = []
     
     try:
@@ -222,12 +251,63 @@ def chat(
                 if stream:
                     raise NotImplementedError("Streaming is not supported yet")
                 else:
-                    # Non-streaming response
-                    response = model.invoke(messages)
-                    print(response)
+                    # Non-streaming response with tool loop
+                    def _run_tools_until_done(
+                        bound_model: BaseChatModel,
+                        start_messages: List[Any],
+                        available_tools: Optional[List[BaseTool]] = None,
+                    ) -> Tuple[AIMessage, List[Any]]:
+                        """Invoke the model and execute any returned tool calls until completion.
+                        Returns the final AIMessage and the list of new messages (AI/tool) produced in this turn.
+                        """
+                        tool_by_name: Dict[str, Any] = {}
+                        if available_tools:
+                            for t in available_tools:
+                                name = getattr(t, "name", getattr(t, "tool_name", None))
+                                if name:
+                                    tool_by_name[name] = t
+
+                        working_messages: List[Any] = list(start_messages)
+                        produced_messages: List[Any] = []
+
+                        while True:
+                            result = bound_model.invoke(working_messages)
+                            # Append the AI message to both trackers
+                            produced_messages.append(result)
+                            working_messages.append(result)
+
+                            tool_calls = getattr(result, "tool_calls", None)
+                            if not tool_calls:
+                                # No tool calls -> final response
+                                return result, produced_messages
+
+                            # Execute each tool call and append ToolMessage
+                            for call in tool_calls:
+                                call_name = getattr(call, "name", None) or (call.get("name") if isinstance(call, dict) else None)
+                                call_args = getattr(call, "args", None) or (call.get("args") if isinstance(call, dict) else None) or {}
+                                call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+
+                                tool = tool_by_name.get(call_name)
+                                if tool is None:
+                                    tool_output = f"Error: Tool '{call_name}' is not available."
+                                else:
+                                    try:
+                                        # LangChain tools created via @tool support .invoke with dict args
+                                        tool_output = tool.invoke(call_args)
+                                    except Exception as e:
+                                        tool_output = f"Error calling tool '{call_name}': {e}"
+
+                                tool_message = ToolMessage(
+                                    content=str(tool_output),
+                                    tool_call_id=call_id or "",
+                                )
+                                produced_messages.append(tool_message)
+                                working_messages.append(tool_message)
+
+                    final_response, produced_messages = _run_tools_until_done(model, messages, collect_tools(tools))
                     live.stop()
                     ui.print("")  # Add whitespace after spinner
-                    ui.print(response.content)
+                    ui.print(final_response.content)
                 
                 # Update conversation history
                 conversation_history.append(HumanMessage(content=out))
@@ -239,25 +319,36 @@ def chat(
                             full_response += chunk.content
                     conversation_history.append(AIMessage(content=full_response))
                 else:
-                    conversation_history.append(response)
+                    # Include AI/tool messages produced during this turn
+                    conversation_history.extend(produced_messages)
                 
                 # Call history callback with new messages
                 if history_callback:
+                    # Find the last HumanMessage and the last AIMessage, ignoring tool messages
+                    last_user = None
+                    last_ai = None
+                    for msg in reversed(conversation_history):
+                        if last_ai is None and isinstance(msg, AIMessage):
+                            last_ai = msg
+                        elif last_user is None and isinstance(msg, HumanMessage):
+                            last_user = msg
+                        if last_user and last_ai:
+                            break
                     new_responses = []
-                    for msg in conversation_history[-2:]:  # Last user and AI messages
-                        if isinstance(msg, HumanMessage):
-                            new_responses.append({
-                                "id": str(uuid.uuid4()).replace("-", "")[:24],
-                                "role": "user", 
-                                "content": [{"text": msg.content, "type": "text"}]
-                            })
-                        elif isinstance(msg, AIMessage):
-                            new_responses.append({
-                                "id": str(uuid.uuid4()).replace("-", "")[:24],
-                                "role": "assistant",
-                                "content": [{"text": msg.content, "type": "text"}]
-                            })
-                    history_callback(new_responses)
+                    if last_user is not None:
+                        new_responses.append({
+                            "id": str(uuid.uuid4()).replace("-", "")[:24],
+                            "role": "user",
+                            "content": [{"text": last_user.content, "type": "text"}],
+                        })
+                    if last_ai is not None:
+                        new_responses.append({
+                            "id": str(uuid.uuid4()).replace("-", "")[:24],
+                            "role": "assistant",
+                            "content": [{"text": last_ai.content, "type": "text"}],
+                        })
+                    if new_responses:
+                        history_callback(new_responses)
 
             ui.print("")  # Add extra newline after bot response
     except KeyboardInterrupt:
@@ -266,7 +357,7 @@ def chat(
         ui.print("")  # Add final newline
 
 
-def main():
+def main(): 
     """Main entry point for the bespoken CLI."""
     typer.run(chat)
 
