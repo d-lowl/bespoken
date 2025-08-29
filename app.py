@@ -36,9 +36,9 @@ model = ChatOllama(
 # Create tools list
 tools = []
 # Add file-specific tools
-tools.extend(FileTool("edit.py"))
+# tools.extend(FileTool("edit.py"))
 # Add general file system tools
-tools.extend([list_files, read_file, write_file, replace_in_file])
+# tools.extend([list_files, read_file, write_file, replace_in_file])
 # Add todo tools
 tools.extend(TodoTools())
 

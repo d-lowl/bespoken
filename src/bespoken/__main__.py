@@ -18,6 +18,8 @@ from langchain_core.messages import ToolMessage
 from typing import Any, Dict, List, Tuple
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from bespoken.tools.toolbox import Toolbox
+
 from . import config
 from . import ui
 
@@ -62,12 +64,18 @@ def handle_tools(tools):
     if tools:
         ui.print("[cyan]Available tools:[/cyan]")
         for tool in tools:
-            name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or type(tool).__name__
-            desc = getattr(tool, 'description', None)
-            if desc:
-                ui.print(f"  {name} - {desc}")
+            if isinstance(tool, Toolbox):
+                # TODO: show all tools in the toolbox
+                pass
             else:
-                ui.print(f"  {name}")
+                # TODO: show a single tool
+                name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or type(tool).__name__
+                desc = getattr(tool, 'description', None)
+                if desc:
+                    ui.print(f"  {name} - {desc}")
+                else:
+                    ui.print(f"  {name}")
+            # NOTE for the agent: this may probably be simplified, but make it nice and readable for the user
     else:
         ui.print("[dim]No tools configured[/dim]")
     ui.print("")
@@ -136,7 +144,7 @@ def chat(
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode to see LLM interactions"),
     model_name: str = typer.Option("anthropic/claude-3-5-sonnet-20240620", "--model", "-m", help="LLM model to use"),
     system_prompt: Optional[str] = typer.Option(None, "--system", "-s", help="System prompt for the assistant"),
-    tools: list = None,
+    tools: list[Toolbox | Callable] = None,
     slash_commands: dict = None,
     history_callback: Optional[Callable] = None,
     stream: bool = typer.Option(True, "--stream", "-s", help="Stream the response from the LLM"),
@@ -167,9 +175,9 @@ def chat(
     
     # Bind tools to the model if provided
     if tools:
+        # TODO: collect all tools from the toolboxe together with individual tools, and then bind them to the model
         model = model.bind_tools(tools)
     
-    print(model)
     conversation_history = []
     
     try:
@@ -335,7 +343,7 @@ def chat(
         ui.print("")  # Add final newline
 
 
-def main():
+def main(): 
     """Main entry point for the bespoken CLI."""
     typer.run(chat)
 
