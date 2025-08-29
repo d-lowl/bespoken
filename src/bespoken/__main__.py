@@ -62,8 +62,12 @@ def handle_tools(tools):
     if tools:
         ui.print("[cyan]Available tools:[/cyan]")
         for tool in tools:
-            tool_name = getattr(tool, 'tool_name', type(tool).__name__)
-            ui.print(f"  {tool_name}")
+            name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or type(tool).__name__
+            desc = getattr(tool, 'description', None)
+            if desc:
+                ui.print(f"  {name} - {desc}")
+            else:
+                ui.print(f"  {name}")
     else:
         ui.print("[dim]No tools configured[/dim]")
     ui.print("")
